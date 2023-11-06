@@ -5,6 +5,7 @@
 #include <string>
 #include <iostream>
 #include <eigen3/Eigen/Eigen>
+#include <cmath>
 
 /* Gazebo library */
 #include <gz/math.hh>
@@ -51,7 +52,7 @@ class GZTruePosPublisher : public rclcpp::Node
         _pose_data.orientation.z = _orientation.Z();
         _pose_data.orientation.w = _orientation.W();
         _gz_pose_publisher->publish(_pose_data);
-        // RCLCPP_INFO(this->get_logger(), "Publishing topic with rate 10Hz / Counter: '%d'",_count);
+        RCLCPP_INFO(this->get_logger(), "Publishing topic with rate 10Hz / Counter: '%d'",_count);
         _count = 0;
     }
 
@@ -67,9 +68,9 @@ class GZTruePosPublisher : public rclcpp::Node
             /* Need to fix */
             /* PX4 local position estimate -> from initial point */
             /* Altitude difference -> find out where it is from */
-            _position.X(_pose.pose(p).position().y());
-            _position.Y(_pose.pose(p).position().x());
-            _position.Z(-_pose.pose(p).position().z()-0.27);
+            _position.X(_pose.pose(p).position().y()+(generate_wgn()*0.3f));
+            _position.Y(_pose.pose(p).position().x()+(generate_wgn()*0.3f));
+            _position.Z(-_pose.pose(p).position().z()-0.27+(generate_wgn()*0.5f));
 
             
             gz::math::Quaterniond _temp_orientation(_pose.pose(p).orientation().w(),
@@ -81,6 +82,14 @@ class GZTruePosPublisher : public rclcpp::Node
 
           }
         }
+    }
+
+    float generate_wgn()
+    {
+      /* generate white Gaussian noise sample with unit std dev */
+      /* using Box-Muller method */
+      float temp=((float)(rand()+1))/(((float)RAND_MAX+1.0f));
+      return sqrtf(-2.0f*logf(temp))*cosf(2.0f*M_PI*rand()/RAND_MAX);
     }
 
     rclcpp::TimerBase::SharedPtr _timer;
