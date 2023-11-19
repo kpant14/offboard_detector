@@ -21,7 +21,7 @@ from px4_msgs.msg import OffboardControlMode
 from px4_msgs.msg import TrajectorySetpoint
 from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommand
 
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import UInt8, Bool
 
 # load private libraries
@@ -62,7 +62,7 @@ class ObserverDetector(Node):
             qos_profile_sub)
         
         self.true_pos_sub       =   self.create_subscription(
-            Pose,
+            PoseStamped,
             '/px4_1/detector/in/gz_true_pose',
             self.gz_true_position_callback,
             qos_profile_sub)
@@ -111,7 +111,7 @@ class ObserverDetector(Node):
                                           [0.00,1.00,0.00,0.00,0.00,0.00],
                                           [0.00,0.00,1.00,0.00,0.00,0.00]],dtype=np.float64)                   # discrete measurement matrix 2
 
-        self.detect_threshold_  =   np.float64(2.00)                                            # detector threshold
+        self.detect_threshold_  =   np.float64(5.00)                                            # detector threshold
 
         self.xhat_past_     =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k-1)
         self.xhat_cur_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k)

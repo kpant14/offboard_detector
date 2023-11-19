@@ -16,7 +16,7 @@
 /* ROS2 library */
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/string.hpp"
-#include "geometry_msgs/msg/pose.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 
 using namespace std::chrono_literals;
 
@@ -32,7 +32,7 @@ class GZTruePosPublisher : public rclcpp::Node
       }
 
       /* Create a publisher with the specified name having a queue size of 10*/
-      _gz_pose_publisher = this->create_publisher<geometry_msgs::msg::Pose>(_gz_true_pose_topic, 10);
+      _gz_pose_publisher = this->create_publisher<geometry_msgs::msg::PoseStamped>(_gz_true_pose_topic, 10);
 
       /* Adjust the callback rate as the same frequency as the camera network */
       _timer = this->create_wall_timer(100ms,std::bind(&GZTruePosPublisher::timer_callback, this));
@@ -43,22 +43,21 @@ class GZTruePosPublisher : public rclcpp::Node
   private:
     void timer_callback()
     {
-        auto _pose_data = geometry_msgs::msg::Pose();
-        _pose_data.position.x = _position.X();
-        _pose_data.position.y = _position.Y();
-        _pose_data.position.z = _position.Z();
-        _pose_data.orientation.x = _orientation.X();
-        _pose_data.orientation.y = _orientation.Y();
-        _pose_data.orientation.z = _orientation.Z();
-        _pose_data.orientation.w = _orientation.W();
+        auto _pose_data = geometry_msgs::msg::PoseStamped();
+        _pose_data.header.frame_id = "drone_true";
+        _pose_data.pose.position.x = _position.X();
+        _pose_data.pose.position.y = _position.Y();
+        _pose_data.pose.position.z = _position.Z();
+        _pose_data.pose.orientation.x = _orientation.X();
+        _pose_data.pose.orientation.y = _orientation.Y();
+        _pose_data.pose.orientation.z = _orientation.Z();
+        _pose_data.pose.orientation.w = _orientation.W();
         _gz_pose_publisher->publish(_pose_data);
-        RCLCPP_INFO(this->get_logger(), "Publishing topic with rate 10Hz / Counter: '%d'",_count);
         _count = 0;
     }
 
     void poseInfoCallback(const gz::msgs::Pose_V &_pose)
     {   
-        RCLCPP_INFO(this->get_logger(), "Subscribing topic");
         _count += 1;
 
         for (int p = 0; p < _pose.pose_size(); p++) {
@@ -93,7 +92,7 @@ class GZTruePosPublisher : public rclcpp::Node
     }
 
     rclcpp::TimerBase::SharedPtr _timer;
-    rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr _gz_pose_publisher;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _gz_pose_publisher;
 
     gz::transport::Node _node;
     gz::math::Vector3d _position;
