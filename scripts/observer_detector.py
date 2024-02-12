@@ -63,7 +63,7 @@ class ObserverDetector(Node):
         
         self.true_pos_sub       =   self.create_subscription(
             PoseStamped,
-            '/px4_1/detector/in/gz_true_pose',
+            '/px4_1/detector/in/gz_true_pose_ned',
             self.gz_true_position_callback,
             qos_profile_sub)
         
@@ -78,13 +78,14 @@ class ObserverDetector(Node):
         self.timer_         =   self.create_timer(self.timer_period_, self.cmdloop_callback)
 
         self.counter_       =   np.uint16(0)                                                    # disable for an experiment
-
-        self.Lobv_          =   np.array([[0.62,0.00,0.00,0.00,0.00,0.00],
-                                          [0.00,0.62,0.00,0.00,0.00,0.00],
-                                          [0.00,0.00,0.62,0.00,0.00,0.00],
-                                          [0.00,0.00,0.00,0.31,0.00,0.00],
-                                          [0.00,0.00,0.00,0.00,0.31,0.00],
-                                          [0.00,0.00,0.00,0.00,0.00,0.31]],dtype=np.float64)    # observer gain
+        #0.31
+        self.Lobv_          =   np.array([[1.5,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.5,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.5,0.00,0.00,0.00],
+                                          [0.00,0.00,0.00,1.8,0.00,0.00],
+                                          [0.00,0.00,0.00,0.00,1.8,0.00],
+                                          [0.00,0.00,0.00,0.00,0.00,1.8]],dtype=np.float64)    # observer gain
+        
         
         self.F_             =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
                                           [0.00,1.00,0.00,0.00,0.00,0.00],
@@ -111,11 +112,12 @@ class ObserverDetector(Node):
                                           [0.00,1.00,0.00,0.00,0.00,0.00],
                                           [0.00,0.00,1.00,0.00,0.00,0.00]],dtype=np.float64)                   # discrete measurement matrix 2
 
-        self.detect_threshold_  =   np.float64(5.00)                                            # detector threshold
+        self.detect_threshold_  =   np.float64(1.00)                                            # detector threshold
 
         self.xhat_past_     =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k-1)
         self.xhat_cur_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k)
         self.residual_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # y(k)-Hx(k)
+        self.residual_pos_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # y(k)-Hx(k)
 
         self.atck_detect_   =   False
 
@@ -125,6 +127,7 @@ class ObserverDetector(Node):
         self.local_acc_ned_     =   None
 
         self.gz_true_pos_ned_   =   None
+        self.gz_true_pos_ned_f_ =   np.array([0.00,0.00,0.00],dtype=np.float64)      # xhat(k-1)
 
     # subscriber callback
     def local_position_callback(self,msg):
@@ -138,13 +141,13 @@ class ObserverDetector(Node):
         self.nav_state = msg.nav_state
 
     def gz_true_position_callback(self, msg):
-        self.gz_true_pos_ned_   =   np.array([msg.position.x,msg.position.y,msg.position.z],dtype=np.float64)
+        self.gz_true_pos_ned_   =   np.array([msg.pose.position.x,msg.pose.position.y,msg.pose.position.z],dtype=np.float64)
 
     # publisher
     def publish_detect_meaconing(self):
         msg                     =   DetectorOutput()
         msg.attack_detect       =   int(self.atck_detect_)
-        msg.detector_residual   =   float(np.linalg.norm(self.residual_))
+        msg.detector_residual   =   float(np.linalg.norm(self.residual_pos_))
         msg.detector_threshold  =   float(self.detect_threshold_)
         self.detect_meaconing.publish(msg)
 
@@ -169,12 +172,25 @@ class ObserverDetector(Node):
                 self.xhat_past_[0:6]    =   self.xhat_cur_[0:6]
                 self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
 
+                # Filter
+                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.5)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
+
                 # Update
-                self.residual_[0:6]     =   np.concatenate((self.local_pos_ned_,self.local_vel_ned_))-np.matmul(self.H1_,self.xhat_cur_[0:6])
-                self.residual_[6:9]     =   self.gz_true_pos_ned_-np.matmul(self.H2_,self.xhat_cur_[0:6])
+                self.residual_[0:6]     =   (np.concatenate((self.local_pos_ned_,self.local_vel_ned_))-np.matmul(self.H1_,self.xhat_cur_[0:6]))
+                self.residual_[6:9]     =   (self.gz_true_pos_ned_f_-np.matmul(self.H2_,self.xhat_cur_[0:6]))
                 self.xhat_cur_[0:6]     =   self.xhat_cur_[0:6]+np.matmul(self.Lobv_,self.residual_[0:6])               # Update using only information coming from the vehicle
 
-                if (np.linalg.norm(self.residual_) >= self.detect_threshold_):
+                self.residual_pos_[0:3] =   0.2*self.residual_[0:3]
+                self.residual_pos_[3:6] =   0.2*self.residual_[6:9]
+
+                print('PX4 local pos: ')
+                print(self.local_pos_ned_)
+                print('PX4 local vel: ')
+                print(self.local_vel_ned_)
+                print('PX4 local acc: ')
+                print(self.local_acc_ned_)
+
+                if (np.linalg.norm(self.residual_pos_) >= self.detect_threshold_):
                     self.atck_detect_       =   True
 
                 else:
