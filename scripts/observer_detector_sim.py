@@ -31,7 +31,7 @@ class ObserverDetector(Node):
 
     def __init__(self):
 
-        super().__init__("observer_detector")
+        super().__init__("observer_detector_sim")
 
         # set publisher and subscriber quality of service profile
         qos_profile_pub =   QoSProfile(
@@ -87,9 +87,9 @@ class ObserverDetector(Node):
                                           [0.00,0.00,0.00,0.00,0.00,1.8]],dtype=np.float64)    # observer gain
         
         
-        self.F_             =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
-                                          [0.00,1.00,0.00,0.00,0.00,0.00],
-                                          [0.00,0.00,1.00,0.00,0.00,0.00],
+        self.F_             =   np.array([[1.00,0.00,0.00,self.timer_period_,0.00,0.00],
+                                          [0.00,1.00,0.00,0.00,self.timer_period_,0.00],
+                                          [0.00,0.00,1.00,0.00,0.00,self.timer_period_],
                                           [0.00,0.00,0.00,1.00,0.00,0.00],
                                           [0.00,0.00,0.00,0.00,1.00,0.00],
                                           [0.00,0.00,0.00,0.00,0.00,1.00]],dtype=np.float64)    # discrete state transition matrix
@@ -162,7 +162,7 @@ class ObserverDetector(Node):
                 self.xhat_cur_[0:3]     =   self.local_pos_ned_
                 self.xhat_cur_[3:6]     =   self.local_vel_ned_
 
-            elif (self.counter_ > 1) and np.mod(self.counter_,5) != 0:
+            elif (self.counter_ > 1) and np.mod(self.counter_,2) != 0:
                 # Propagation only
                 self.xhat_past_[0:6]    =   self.xhat_cur_[0:6]
                 self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
@@ -173,7 +173,7 @@ class ObserverDetector(Node):
                 self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
 
                 # Filter
-                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.5)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
+                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.0)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
 
                 # Update
                 self.residual_[0:6]     =   (np.concatenate((self.local_pos_ned_,self.local_vel_ned_))-np.matmul(self.H1_,self.xhat_cur_[0:6]))

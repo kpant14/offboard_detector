@@ -72,7 +72,9 @@ install(TARGETS
 
 # install python executables
 install(PROGRAMS
-  scripts/observer_detector.py
+  scripts/observer_detector_sim.py
+  scripts/observer_detector_real.py
+  scripts/observer_detector_exp.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

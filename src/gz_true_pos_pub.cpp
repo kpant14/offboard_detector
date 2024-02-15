@@ -81,9 +81,9 @@ class GZTruePosPublisher : public rclcpp::Node
             /* PX4 local position estimate -> from initial point */
             /* Altitude difference -> find out where it is from */
             /* No attitude offset -0.27m */
-            _position_ned.X(_pose.pose(p).position().y()+(generate_wgn()*0.04f));
-            _position_ned.Y(_pose.pose(p).position().x()+(generate_wgn()*0.04f));
-            _position_ned.Z(-_pose.pose(p).position().z()+(generate_wgn()*0.08f)-0.035);
+            _position_ned.X(_pose.pose(p).position().y()+(generate_wgn()*0.01f));
+            _position_ned.Y(_pose.pose(p).position().x()+(generate_wgn()*0.01f));
+            _position_ned.Z(-_pose.pose(p).position().z()+(generate_wgn()*0.02f)-0.035);
 
             
             gz::math::Quaterniond _temp_orientation(_pose.pose(p).orientation().w(),
