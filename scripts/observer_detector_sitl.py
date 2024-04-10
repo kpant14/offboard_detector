@@ -31,7 +31,7 @@ class ObserverDetector(Node):
 
     def __init__(self):
 
-        super().__init__("observer_detector_sim")
+        super().__init__("observer_detector")
 
         # set publisher and subscriber quality of service profile
         qos_profile_pub =   QoSProfile(
@@ -47,30 +47,31 @@ class ObserverDetector(Node):
             history     =   QoSHistoryPolicy.KEEP_LAST,
             depth = 1
         )
-
+        self.declare_parameter('px4_ns', 'px4_1')
+        self.ns = self.get_parameter('px4_ns').get_parameter_value().string_value
         # define subscribers
         self.status_sub         =   self.create_subscription(
             VehicleStatus,
-            '/px4_1/fmu/out/vehicle_status',
+            f'{self.ns}/fmu/out/vehicle_status',
             self.vehicle_status_callback,
             qos_profile_sub)
 
         self.local_pos_sub      =    self.create_subscription(
             VehicleLocalPosition,
-            '/px4_1/fmu/out/vehicle_local_position',
+            f'{self.ns}/fmu/out/vehicle_local_position',
             self.local_position_callback,
             qos_profile_sub)
         
         self.true_pos_sub       =   self.create_subscription(
             PoseStamped,
-            '/px4_1/detector/in/gz_true_pose_ned',
+            f'{self.ns}/detector/in/gz_true_pose_ned',
             self.gz_true_position_callback,
             qos_profile_sub)
         
         # define publishers
         self.detect_meaconing   =   self.create_publisher(
             DetectorOutput,
-            '/px4_1/detector/out/observer_output',
+            f'{self.ns}/detector/out/observer_output',
              qos_profile_pub)
 
         # parameters for callback
@@ -87,9 +88,9 @@ class ObserverDetector(Node):
                                           [0.00,0.00,0.00,0.00,0.00,1.8]],dtype=np.float64)    # observer gain
         
         
-        self.F_             =   np.array([[1.00,0.00,0.00,self.timer_period_,0.00,0.00],
-                                          [0.00,1.00,0.00,0.00,self.timer_period_,0.00],
-                                          [0.00,0.00,1.00,0.00,0.00,self.timer_period_],
+        self.F_             =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.00,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.00,0.00,0.00,0.00],
                                           [0.00,0.00,0.00,1.00,0.00,0.00],
                                           [0.00,0.00,0.00,0.00,1.00,0.00],
                                           [0.00,0.00,0.00,0.00,0.00,1.00]],dtype=np.float64)    # discrete state transition matrix
@@ -162,7 +163,7 @@ class ObserverDetector(Node):
                 self.xhat_cur_[0:3]     =   self.local_pos_ned_
                 self.xhat_cur_[3:6]     =   self.local_vel_ned_
 
-            elif (self.counter_ > 1) and np.mod(self.counter_,2) != 0:
+            elif (self.counter_ > 1) and np.mod(self.counter_,5) != 0:
                 # Propagation only
                 self.xhat_past_[0:6]    =   self.xhat_cur_[0:6]
                 self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
@@ -173,7 +174,7 @@ class ObserverDetector(Node):
                 self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
 
                 # Filter
-                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.0)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
+                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.5)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
 
                 # Update
                 self.residual_[0:6]     =   (np.concatenate((self.local_pos_ned_,self.local_vel_ned_))-np.matmul(self.H1_,self.xhat_cur_[0:6]))
@@ -182,13 +183,6 @@ class ObserverDetector(Node):
 
                 self.residual_pos_[0:3] =   0.2*self.residual_[0:3]
                 self.residual_pos_[3:6] =   0.2*self.residual_[6:9]
-
-                print('PX4 local pos: ')
-                print(self.local_pos_ned_)
-                print('PX4 local vel: ')
-                print(self.local_vel_ned_)
-                print('PX4 local acc: ')
-                print(self.local_acc_ned_)
 
                 if (np.linalg.norm(self.residual_pos_) >= self.detect_threshold_):
                     self.atck_detect_       =   True

@@ -26,7 +26,8 @@ find_package(gz-math7 REQUIRED)
 find_package(gz-sensors7 REQUIRED)
 find_package (Eigen3 REQUIRED)
 find_package(gz-rendering7 REQUIRED)
-
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 if(gz-transport12_FOUND)
 	add_compile_options(-frtti -fexceptions)
 
@@ -58,7 +59,8 @@ include_directories(include)
 # create cpp executable
 add_executable(gz_true_pos_pub src/gz_true_pos_pub.cpp)
 ament_target_dependencies(gz_true_pos_pub rclcpp
-                        gz-transport12 gz-sensors7 gz-rendering7 gz-msgs9 gz-math7 std_msgs geometry_msgs)                        
+                        gz-transport12 gz-sensors7 gz-rendering7 gz-msgs9 gz-math7 tf2
+                        tf2_ros std_msgs geometry_msgs)                        
 target_include_directories(gz_true_pos_pub PUBLIC ${Eigen3_INCLUDE_DIRS})
 
 # install cpp executables
@@ -67,23 +69,21 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# install python modules
-# ament_python_install_package(${PROJECT_NAME})
-
 # install python executables
 install(PROGRAMS
-  scripts/observer_detector_sim.py
+  scripts/observer_detector_sitl.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+# install python executables
+install(PROGRAMS
   scripts/observer_detector_real.py
-  scripts/observer_detector_exp.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# link against the interface
-#rosidl_target_interfaces(gz_true_pos_pub
-#  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-
-
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

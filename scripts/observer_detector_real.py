@@ -9,20 +9,13 @@ __contact__ =   "yang1272@purdue.edu, cho515@purdue.edu, kpant@purdue.edu"
 
 # load public libraries
 import numpy as np
-import argparse
-
 # load ROS2 related libraries
 import rclpy
 from rclpy.node import Node
-from rclpy.clock import Clock
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-
-from px4_msgs.msg import OffboardControlMode
-from px4_msgs.msg import TrajectorySetpoint
-from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommand
+from px4_msgs.msg import VehicleOdometry
 
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import UInt8, Bool
 
 # load private libraries
 from offboard_detector.msg import DetectorOutput
@@ -47,93 +40,100 @@ class ObserverDetector(Node):
             history     =   QoSHistoryPolicy.KEEP_LAST,
             depth = 1
         )
-
+        self.declare_parameter('px4_ns', 'px4_1')
+        self.declare_parameter('mocap_rigid_body', 'drone162')
+        self.ns = self.get_parameter('px4_ns').get_parameter_value().string_value
         # define subscribers
-        self.status_sub         =   self.create_subscription(
-            VehicleStatus,
-            '/px4_1/fmu/out/vehicle_status',
-            self.vehicle_status_callback,
-            qos_profile_sub)
-
         self.local_pos_sub      =    self.create_subscription(
-            VehicleLocalPosition,
-            '/px4_1/fmu/out/vehicle_local_position',
-            self.local_position_callback,
+            VehicleOdometry,
+            f'{self.ns}/fmu/out/vehicle_odometry',
+            self.odom_callback,
             qos_profile_sub)
         
-        self.true_pos_sub       =   self.create_subscription(
+        self.rigid_body = self.get_parameter('mocap_rigid_body').get_parameter_value().string_value
+        self.mocap_pose_sub_ = self.create_subscription(
             PoseStamped,
-            '/px4_1/detector/in/gz_true_pose_ned',
-            self.gz_true_position_callback,
-            qos_profile_sub)
+            f'/{self.rigid_body}/pose',
+            self.true_position_callback,
+            10
+        )
         
         # define publishers
         self.detect_meaconing   =   self.create_publisher(
             DetectorOutput,
-            '/px4_1/detector/out/observer_output',
+            f'{self.ns}/detector/out/observer_output',
              qos_profile_pub)
 
         # parameters for callback
         self.timer_period_  =   0.02                                                            # seconds
         self.timer_         =   self.create_timer(self.timer_period_, self.cmdloop_callback)
 
-        self.loop_counter_  =   np.uint16(0) 
-        self.entry_execute_ =   np.uint8(0)
+        self.counter_       =   np.uint16(0)                                                    # disable for an experiment
 
-        self.Lobv_          =   np.array([[1.12,0.00,0.00],
-                                          [0.00,1.12,0.00],
-                                          [0.00,0.00,1.12]],dtype=np.float64)                   # observer gain
+        self.Lobv_          =   np.array([[1.5,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.5,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.5,0.00,0.00,0.00],
+                                          [0.00,0.00,0.00,1.8,0.00,0.00],
+                                          [0.00,0.00,0.00,0.00,1.8,0.00],
+                                          [0.00,0.00,0.00,0.00,0.00,1.8]],dtype=np.float64)    # observer gain
         
         
-        self.F_             =   np.array([[1.00,0.00,0.00],
-                                          [0.00,1.00,0.00],
-                                          [0.00,0.00,1.00]],dtype=np.float64)                   # discrete state transition matrix
+        self.F_             =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.00,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.00,0.00,0.00,0.00],
+                                          [0.00,0.00,0.00,1.00,0.00,0.00],
+                                          [0.00,0.00,0.00,0.00,1.00,0.00],
+                                          [0.00,0.00,0.00,0.00,0.00,1.00]],dtype=np.float64)    # discrete state transition matrix
         
-        self.G_             =   np.array([[self.timer_period_, 0.00, 0.00],
+        self.G_             =   np.array([[np.power(self.timer_period_,2)/2, 0.00, 0.00],
+                                          [0.00, np.power(self.timer_period_,2)/2, 0.00],
+                                          [0.00, 0.00, np.power(self.timer_period_,2)/2],
+                                          [self.timer_period_, 0.00, 0.00],
                                           [0.00, self.timer_period_, 0.00],
                                           [0.00, 0.00, self.timer_period_]],dtype=np.float64)   # discrete input matrix
         
-        self.H1_            =   np.array([[1.00,0.00,0.00],
-                                          [0.00,1.00,0.00],
-                                          [0.00,0.00,1.00]],dtype=np.float64)                   # discrete measurement matrix 1
+        self.H1_            =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.00,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.00,0.00,0.00,0.00],
+                                          [0.00,0.00,0.00,1.00,0.00,0.00],
+                                          [0.00,0.00,0.00,0.00,1.00,0.00],
+                                          [0.00,0.00,0.00,0.00,0.00,1.00]],dtype=np.float64)    # discrete measurement matrix 1
         
-        self.H2_            =   np.array([[1.00,0.00,0.00],
-                                          [0.00,1.00,0.00],
-                                          [0.00,0.00,1.00]],dtype=np.float64)                   # discrete measurement matrix 2
+        self.H2_            =   np.array([[1.00,0.00,0.00,0.00,0.00,0.00],
+                                          [0.00,1.00,0.00,0.00,0.00,0.00],
+                                          [0.00,0.00,1.00,0.00,0.00,0.00]],dtype=np.float64)                   # discrete measurement matrix 2
 
         self.detect_threshold_  =   np.float64(1.00)                                            # detector threshold
 
-        self.xhat_past_     =   np.array([0.00,0.00,0.00],dtype=np.float64)                     # xhat(k-1)
-        self.xhat_cur_      =   np.array([0.00,0.00,0.00],dtype=np.float64)                     # xhat(k)
-        self.residual_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # y(k)-Hx(k)
+        self.xhat_past_     =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k-1)
+        self.xhat_cur_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # xhat(k)
+        self.residual_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # y(k)-Hx(k)
+        self.residual_pos_      =   np.array([0.00,0.00,0.00,0.00,0.00,0.00],dtype=np.float64)      # y(k)-Hx(k)
 
         self.atck_detect_   =   False
 
         # variables for subscribers
         self.local_pos_ned_     =   None
         self.local_vel_ned_     =   None
+        self.local_acc_ned_     =   None
 
-        self.gz_true_pos_ned_   =   None
-        self.gz_true_pos_ned_f_ =   np.array([0.00,0.00,0.00],dtype=np.float64)                 # filtered true position
+        self.true_pos_ned_   =   None
+        self.true_pos_ned_f_ =   np.array([0.00,0.00,0.00],dtype=np.float64)      # xhat(k-1)
 
     # subscriber callback
-    def local_position_callback(self,msg):
-        self.local_pos_ned_     =   np.array([msg.x,msg.y,msg.z],dtype=np.float64)
-        self.local_vel_ned_     =   np.array([msg.vx,msg.vy,msg.vz],dtype=np.float64)
+    def odom_callback(self,msg):
+        self.local_pos_ned_      =   np.array([msg.position[0],msg.position[1],msg.position[2]],dtype=np.float64)
+        self.local_vel_ned_     =   np.array([msg.velocity[0],msg.velocity[1],msg.velocity[2]],dtype=np.float64)
 
-    def vehicle_status_callback(self, msg):
-        # print("NAV_STATUS: ", msg.nav_state)
-        # print("  - offboard status: ", VehicleStatus.NAVIGATION_STATE_OFFBOARD)
-        self.nav_state = msg.nav_state
-
-    def gz_true_position_callback(self, msg):
-        self.gz_true_pos_ned_   =   np.array([msg.pose.position.x,msg.pose.position.y,msg.pose.position.z],dtype=np.float64)
+    def true_position_callback(self, msg):
+        ##ENU->NED
+        self.true_pos_ned_   =   np.array([msg.pose.position.y,msg.pose.position.x,-msg.pose.position.z],dtype=np.float64)
 
     # publisher
     def publish_detect_meaconing(self):
         msg                     =   DetectorOutput()
         msg.attack_detect       =   int(self.atck_detect_)
-        msg.detector_residual   =   float(np.linalg.norm(self.residual_))
+        msg.detector_residual   =   float(np.linalg.norm(self.residual_pos_))
         msg.detector_threshold  =   float(self.detect_threshold_)
         self.detect_meaconing.publish(msg)
 
@@ -141,41 +141,39 @@ class ObserverDetector(Node):
     def cmdloop_callback(self):
         if (self.local_pos_ned_ is not None) and (self.gz_true_pos_ned_ is not None):
 
-            self.loop_counter_   +=  1
+            self.counter_   +=  1   # disable for an experiment
 
-            if self.entry_execute_  < 1:
+            if self.counter_ <= 1:
                 # Initialize
                 self.xhat_cur_[0:3]     =   self.local_pos_ned_
-                self.entry_execute_     =   1
+                self.xhat_cur_[3:6]     =   self.local_vel_ned_
 
-            elif (self.loop_counter_ >= 1) and np.mod(self.loop_counter_,1) != 0:                                               # This branch disabled
+            elif (self.counter_ > 1) and np.mod(self.counter_,5) != 0:
                 # Propagation only
-                self.xhat_past_[0:3]    =   self.xhat_cur_[0:3]
-                self.xhat_cur_[0:3]     =   np.matmul(self.F_,self.xhat_cur_[0:3])+np.matmul(self.G_,self.local_vel_ned_)
+                self.xhat_past_[0:6]    =   self.xhat_cur_[0:6]
+                self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
 
             else:
                 # Propagation
-                self.xhat_past_[0:3]    =   self.xhat_cur_[0:3]
-                self.xhat_cur_[0:3]     =   np.matmul(self.F_,self.xhat_cur_[0:3])+np.matmul(self.G_,self.local_vel_ned_)
+                self.xhat_past_[0:6]    =   self.xhat_cur_[0:6]
+                self.xhat_cur_[0:6]     =   np.matmul(self.F_,self.xhat_cur_[0:6])+np.matmul(self.G_,self.local_acc_ned_)
 
                 # Filter
-                self.gz_true_pos_ned_f_ =   self.gz_true_pos_ned_f_+(1-0.1)*(self.gz_true_pos_ned_-self.gz_true_pos_ned_f_)
+                self.true_pos_ned_f_ =   self.true_pos_ned_f_+(1-0.5)*(self.true_pos_ned_-self.true_pos_ned_f_)
 
                 # Update
-                self.residual_[0:3]     =   (self.local_pos_ned_-np.matmul(self.H1_,self.xhat_cur_[0:3]))
-                self.residual_[3:6]     =   (self.gz_true_pos_ned_f_-np.matmul(self.H2_,self.xhat_cur_[0:3]))
-                self.xhat_cur_[0:6]     =   self.xhat_cur_[0:3]+np.matmul(self.Lobv_,self.residual_[0:3])                       # Update using only information coming from the vehicle
-                self.loop_counter_      =   0
+                self.residual_[0:6]     =   (np.concatenate((self.local_pos_ned_,self.local_vel_ned_))-np.matmul(self.H1_,self.xhat_cur_[0:6]))
+                self.residual_[6:9]     =   (self.true_pos_ned_f_-np.matmul(self.H2_,self.xhat_cur_[0:6]))
+                self.xhat_cur_[0:6]     =   self.xhat_cur_[0:6]+np.matmul(self.Lobv_,self.residual_[0:6])               # Update using only information coming from the vehicle
 
-                if (np.linalg.norm(self.residual_) >= self.detect_threshold_):
+                self.residual_pos_[0:3] =   0.2*self.residual_[0:3]
+                self.residual_pos_[3:6] =   0.2*self.residual_[6:9]
+
+                if (np.linalg.norm(self.residual_pos_) >= self.detect_threshold_):
                     self.atck_detect_       =   True
 
                 else:
                     self.atck_detect_       =   False
-
-        else:
-        
-            self.entry_execute_     =   0
 
         self.publish_detect_meaconing()
             
