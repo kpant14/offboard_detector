@@ -33,7 +33,7 @@ def generate_launch_description():
     
     offboard_detector = Node(
         package='offboard_detector',
-        executable='observer_detector.py',
+        executable='observer_detector_sitl.py',
         parameters=[
             {'px4_ns': px4_ns},
         ]
